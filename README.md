@@ -1,5 +1,6 @@
-MQ_ADAPTER
-===========
+MQ_ADAPTER [![Travis](https://travis-ci.com/walkohm/mq_adapter.svg?branch=master)](https://travis-ci.com/walkohm/mq_adapter#)
+=============================================================================================================================
+
  Run as Docker container:
  ----
 ```sh
