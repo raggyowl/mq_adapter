@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/tls"
-	"fmt"
 	"github.com/gorilla/mux"
 	log "github.com/sirupsen/logrus"
 	"github.com/streadway/amqp"
@@ -20,7 +19,6 @@ func init() {
 }
 
 func main() {
-	var port = os.Getenv("PORT")
 	var rabbitURL = os.Getenv("RABBIT_URL")
 	if rabbitURL == "" {
 		log.Error("Rabbit url not specified")
@@ -87,7 +85,7 @@ func main() {
 		}
 
 	})
-	log.Infof("Start server on port %d", port)
-	log.Error(http.ListenAndServe(fmt.Sprintf(":%d", port), router))
+	log.Info("Start server on port 9090")
+	log.Error(http.ListenAndServe(":9090", router))
 
 }
