@@ -8,6 +8,8 @@ import (
 	"net/http"
 )
 
+//TODO: Write tests
+
 type RabbitAdapter struct {
 	Channel *amqp.Channel
 	Client  *http.Client
