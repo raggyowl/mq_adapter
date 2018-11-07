@@ -3,7 +3,7 @@ MQ_ADAPTER
  Run as Docker container:
  ----
 ```sh
-$docker run -d walkohm/mq_adapter
+$docker run -d walkohm/mq_adapter -p
 ```
  Run in bash (you have installed [golang](https://golang.org/doc/install)):
  ----

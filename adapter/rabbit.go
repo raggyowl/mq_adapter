@@ -19,6 +19,7 @@ func (r *RabbitAdapter) CreateOrConnectExchange(name string) error {
 	if err != nil {
 		return errors.Wrapf(err, "Failed create or connect to exchange %s", name)
 	}
+	return nil
 }
 
 //Fetch data from exchange by routing key and send it to url
