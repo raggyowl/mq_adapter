@@ -21,7 +21,7 @@ func init() {
 func main() {
 	var rabbitURL = os.Getenv("RABBIT_URL")
 	if rabbitURL == "" {
-		log.Error("Rabbit url not specified")
+		log.Fatal("Rabbit url not specified")
 	}
 	var inputExchange = os.Getenv("INPUT_EXCHANGE")
 	if inputExchange == "" {
