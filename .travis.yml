@@ -1,0 +1,28 @@
+language: go
+go:
+- '1.11'
+sudo: false
+git:
+  quiet: true
+  depth: 5
+env:
+  global:
+  - GO111MODULE=on
+  - GOOS=linux
+  - GOARCH=amd64
+  - CGO_ENABLED=0
+services:
+  - docker
+before_install:
+  - go get -u golang.org/x/lint/golint
+script:
+  - go vet ./...
+  - golint .
+  - go build -a -installsuffix cgo -o build
+  - docker build -t $TRAVIS_REPO_SLUG .
+  - echo "$DOCKER_PASSWD" | docker login --username "$DOCKER_USER" --password-stdin
+  - docker push $TRAVIS_REPO_SLUG
+notifications:
+  slack:
+    secure: mO2cb8vbuEwS5CLze/5/NIikpQZ7EvnX+2bQm7USK2STUXG8QXyAfJbeoULFDA3dhsyXFBlu5uYcXKHnofbwCGolxjlN3OBsjm+SW5FSBE0/5v2Ci8fEMJEtv51q3kfjbFUXQkwx6J/Qc3ZxzUFUqAuoD9gMgdCAaUf0VrvNxRA/ULfCOjx6sAqLfmjNecTOAwid22uEStKS4KVZnn6w/PUDnF8oxxoqlRe5UKPe1jX2grhnxljuXmATCzMfZCC2lnIQ8S2IR5S4Ozx47fCDglJFrxyNacyzGhUysx2nS0nmojuawTVMKJcDo1vzgnFpBjAHLcQCSOkhLfBup6kLRODvULR97eEGpldwc3mdhv2RHAWeXn4ox+TEDuAyufeeTUJSCuIEsHxOnKlY+fHb5kVPHu6bfsK+HefRt13fnmctkFFM88FSCRMGCe3npTpULmC/wXCQisDm0wr+8hG84PnjPzPT8guDFqzGIlZ+3yr3AGnRoagijV6mUyrDauOj/uhzyI6ffQq/vJzZKouvKXT8kd1ZiKX7zj4esVcDi8GYDCsUxjC5OdK7tfT08l6eX/ZJfvT8R8MpnhPl/mqRKFhc+8xDapxsvQVczeE7iPB5a4Z3UmjZbcuawxvelrH2yOLBlOqMuqHDmQf53uUDHdNjle8eSlsYYRJ6GE1y+Mw=
+  email: false
