@@ -26,7 +26,7 @@ func (r *RabbitAdapter) CreateOrConnectExchange(name string) error {
 
 //Fetch data from exchange by routing key and send it to url
 func (r *RabbitAdapter) Fetch(routingKey, exchange, url string) error {
-	queue, err := r.Channel.QueueDeclare(fmt.Sprintf("test_queue_%s", routingKey), false, false, false, false, nil)
+	queue, err := r.Channel.QueueDeclare(fmt.Sprintf("test_mq_adapter_queue_%s", routingKey), false, false, false, false, nil)
 	if err != nil {
 		return errors.Wrapf(err, "Failed declare queue %s", err)
 	}
