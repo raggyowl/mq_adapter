@@ -47,7 +47,7 @@ func main() {
 	if err != nil {
 		log.Error(err)
 	}
-	ra := &adapter.RabbitAdapter{channel, client}
+	ra := &adapter.RabbitAdapter{Channel: channel, Client: client}
 	defer ra.Close()
 
 	if err = ra.CreateOrConnectExchange(outputExchange); err != nil {
