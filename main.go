@@ -76,12 +76,17 @@ func main() {
 		defer request.Body.Close()
 		body, err := ioutil.ReadAll(request.Body)
 		if err != nil {
-			log.Warning(err)
+			log.Error(err)
+			writer.WriteHeader(http.StatusBadRequest)
+			writer.Write([]byte(err.Error()))
 		}
 
 		err = ra.Dispatch(vars["route"], contentType, inputExchange, body)
 		if err != nil {
 			log.Error(err)
+			writer.WriteHeader(http.StatusInternalServerError)
+			writer.Write([]byte(err.Error()))
+			
 		}
 
 	})
