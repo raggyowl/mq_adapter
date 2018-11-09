@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"github.com/streadway/amqp"
 	"net/http"
 )
@@ -34,13 +35,23 @@ func (r *RabbitAdapter) Fetch(routingKey, exchange, url string) error {
 	if err != nil {
 		return errors.Wrapf(err, "Failed bind queue %s to %s", queue.Name, exchange)
 	}
+	
 	msgs, err := r.Channel.Consume(queue.Name, "", false, false, false, false, nil)
 	if err != nil {
 		return errors.Wrapf(err, "Failed consume messages from %s", queue.Name)
 	}
 	go func() {
 		for m := range msgs {
-			r.Client.Post(url, "application/json", bytes.NewReader(m.Body))
+				resp,err:=r.Client.Post(url, "application/json", bytes.NewReader(m.Body))
+				if err!=nil{
+					log.Warningf("Dispatch message falied with error %s",err)
+					m.Nack(true,false)
+					continue
+				}
+				if resp.StatusCode == 200 {
+					m.Ack(true)
+				}
+				m.Nack(true,false)
 		}
 	}()
 
