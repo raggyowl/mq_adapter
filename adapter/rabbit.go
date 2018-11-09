@@ -48,6 +48,7 @@ func (r *RabbitAdapter) Fetch(routingKey, exchange, url string) error {
 					m.Nack(true,false)
 					continue
 				}
+				defer resp.Body.Close()
 				if resp.StatusCode == 200 {
 					m.Ack(true)
 				}
