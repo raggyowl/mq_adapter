@@ -18,7 +18,8 @@ type RabbitAdapter struct {
 
 //CreateOrConnectExchange create topic exchange if does not exist or connect to exists exchange
 func (r *RabbitAdapter) CreateOrConnectExchange(name string) error {
-	err := r.Channel.ExchangeDeclare(name, "topic", false, false, false, false, nil)
+	//ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args Table)
+	err := r.Channel.ExchangeDeclare(name, "topic",false, false, false, false, nil)
 	if err != nil {
 		return errors.Wrapf(err, "Failed create or connect to exchange %s", name)
 	}
@@ -27,32 +28,36 @@ func (r *RabbitAdapter) CreateOrConnectExchange(name string) error {
 
 //Fetch data from exchange by routing key and send it to url
 func (r *RabbitAdapter) Fetch(routingKey, exchange, url string) error {
+	//QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args Table)
 	queue, err := r.Channel.QueueDeclare(fmt.Sprintf("test_mq_adapter_queue_%s", routingKey), false, false, false, false, nil)
 	if err != nil {
 		return errors.Wrapf(err, "Failed declare queue %s", err)
 	}
+	//QueueBind(name, key, exchange string, noWait bool, args Table)
 	err = r.Channel.QueueBind(queue.Name, routingKey, exchange, false, nil)
 	if err != nil {
 		return errors.Wrapf(err, "Failed bind queue %s to %s", queue.Name, exchange)
 	}
-	
+	//Consume(queue, consumer string, autoAsk, exclusive noLocal, noWait bool args Table)
 	msgs, err := r.Channel.Consume(queue.Name, "", false, false, false, false, nil)
 	if err != nil {
 		return errors.Wrapf(err, "Failed consume messages from %s", queue.Name)
 	}
 	go func() {
 		for m := range msgs {
-				resp,err:=r.Client.Post(url, "application/json", bytes.NewReader(m.Body))
-				if err!=nil{
+				if resp,err:=r.Client.Post(url, "application/json", bytes.NewReader(m.Body));err!=nil{
 					log.Warningf("Dispatch message falied with error %s",err)
-					m.Nack(true,false)
-					continue
-				}
-				defer resp.Body.Close()
-				if resp.StatusCode == 200 {
-					m.Ack(true)
-				}
-				m.Nack(true,false)
+					
+				} else{
+					defer resp.Body.Close()
+					if resp.StatusCode == 200 {
+						//Ask(multipli bool)
+						m.Ack(true)
+						continue
+					}
+				}	
+				//Nask(multipli, requeue bool)
+				m.Nack(true,true)
 		}
 	}()
 
@@ -61,6 +66,7 @@ func (r *RabbitAdapter) Fetch(routingKey, exchange, url string) error {
 
 //Dispatch data to exchange by routing key
 func (r *RabbitAdapter) Dispatch(routingKey, contentType, exchange string, data []byte) error {
+	//Publish(exchange, key, mandatory, immediate bool, msg Publishing)
 	err := r.Channel.Publish(exchange, routingKey, false, false, amqp.Publishing{
 		ContentType: contentType,
 		Body:        data,
