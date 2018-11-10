@@ -19,7 +19,7 @@ type RabbitAdapter struct {
 //CreateOrConnectExchange create topic exchange if does not exist or connect to exists exchange
 func (r *RabbitAdapter) CreateOrConnectExchange(name string) error {
 	//ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args Table)
-	err := r.Channel.ExchangeDeclare(name, "topic",false, false, false, false, nil)
+	err := r.Channel.ExchangeDeclare(name, "topic",true, false, false, false, nil)
 	if err != nil {
 		return errors.Wrapf(err, "Failed create or connect to exchange %s", name)
 	}
@@ -29,7 +29,7 @@ func (r *RabbitAdapter) CreateOrConnectExchange(name string) error {
 //Fetch data from exchange by routing key and send it to url
 func (r *RabbitAdapter) Fetch(routingKey, exchange, url string) error {
 	//QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args Table)
-	queue, err := r.Channel.QueueDeclare(fmt.Sprintf("test_mq_adapter_queue_%s", routingKey), false, false, false, false, nil)
+	queue, err := r.Channel.QueueDeclare(fmt.Sprintf("test_mq_adapter_queue_%s", routingKey), true, false, false, false, nil)
 	if err != nil {
 		return errors.Wrapf(err, "Failed declare queue %s", err)
 	}
