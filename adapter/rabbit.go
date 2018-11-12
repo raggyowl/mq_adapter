@@ -19,7 +19,7 @@ type RabbitAdapter struct {
 //CreateOrConnectExchange create topic exchange if does not exist or connect to exists exchange
 func (r *RabbitAdapter) CreateOrConnectExchange(name string) error {
 	//ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args Table)
-	err := r.Channel.ExchangeDeclare(name, "topic",true, false, false, false, nil)
+	err := r.Channel.ExchangeDeclare(name, "topic", true, false, false, false, nil)
 	if err != nil {
 		return errors.Wrapf(err, "Failed create or connect to exchange %s", name)
 	}
@@ -45,19 +45,18 @@ func (r *RabbitAdapter) Fetch(routingKey, exchange, url string) error {
 	}
 	go func() {
 		for m := range msgs {
-				if resp,err:=r.Client.Post(url, "application/json", bytes.NewReader(m.Body));err!=nil{
-					log.Warningf("Dispatch message falied with error %s",err)
-					
-				} else{
-					defer resp.Body.Close()
-					if resp.StatusCode == 200 {
-						//Ask(multipli bool)
-						m.Ack(true)
-						continue
-					}
-				}	
-				//Nask(multipli, requeue bool)
-				m.Nack(true,true)
+			if resp, err := r.Client.Post(fmt.Sprintf("%s/%s", url, routingKey), "application/json", bytes.NewReader(m.Body)); err != nil {
+				log.Warningf("Dispatch message with key %s failed: %s", routingKey, err)
+			} else {
+				defer resp.Body.Close()
+				if resp.StatusCode == 200 {
+					//Ask(multiple bool)
+					m.Ack(true)
+					continue
+				}
+			}
+			//Nask(multipli, requeue bool)
+			m.Nack(true, true)
 		}
 	}()
 
