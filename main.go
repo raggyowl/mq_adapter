@@ -26,13 +26,13 @@ func main() {
 	var inputExchange = os.Getenv("INPUT_EXCHANGE")
 	if inputExchange == "" {
 		//default value
-		inputExchange = "input_exchange"
+		inputExchange = "input_exchange_mq_adapter"
 	}
 
 	var outputExchange = os.Getenv("OUTPUT_EXCHANGE")
 	if outputExchange == "" {
 		//default value
-		outputExchange = "output_exchange"
+		outputExchange = "output_exchange_mq_adapter"
 	}
 
 	//test
