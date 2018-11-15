@@ -45,7 +45,7 @@ func (r *RabbitAdapter) Fetch(routingKey, exchange, url string) error {
 	}
 	go func() {
 		for m := range msgs {
-			if resp, err := r.Client.Post(fmt.Sprintf("%s/%s", url, routingKey), "application/json", bytes.NewReader(m.Body)); err != nil {
+			if resp, err := r.Client.Post(fmt.Sprintf("%s/%s", url, m.RoutingKey), "application/json", bytes.NewReader(m.Body)); err != nil {
 				log.Warningf("Dispatch message with key %s failed: %s", routingKey, err)
 			} else {
 				defer resp.Body.Close()
