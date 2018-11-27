@@ -1,15 +1,19 @@
 package adapter
 
 import (
+	"time"
 	"bytes"
 	"fmt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/streadway/amqp"
+	"github.com/furdarius/rabbitroutine"
 	"net/http"
 )
 
 //TODO: Write tests
+
+
 
 type RabbitAdapter struct {
 	Channel *amqp.Channel
@@ -80,4 +84,23 @@ func (r *RabbitAdapter) Dispatch(routingKey, contentType, exchange string, data 
 //Close opened channel
 func (r *RabbitAdapter) Close() {
 	defer r.Channel.Close()
+}
+
+type RabbitMQAdapter struct{
+	Consumer *Consumer
+	Publisher *Publisher
+}
+
+func NewRabbitMQAdapter(conn *rabbitroutine.Connector)*RabbitMQAdapter{
+	consumer:=&Consumer{
+		ExchangeName: "test",
+		QueueName: "test",
+	}
+
+	publisher:= rabbitroutine.NewRetryPublisher(
+		rabbitroutine.NewEnsurePublisher(rabbitroutine.NewPool(conn)),
+		rabbitroutine.PublishMaxAttemptsSetup(16),
+		rabbitroutine.PublishDelaySetup(rabbitroutine.LinearDelay(10*time.Millisecond)),
+	)
+	publisher.P
 }
