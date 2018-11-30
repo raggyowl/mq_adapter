@@ -6,10 +6,16 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/streadway/amqp"
 	"github.com/walkohm/mq_adapter/adapter"
+	"github.com/furdarius/rabbitroutine"
+	"golang.org/x/sync/errgroup"
 	"io/ioutil"
 	"net/http"
+	"context"
 	"os"
 )
+
+var ErrTermSig = errors.New("Termination signal caught")
+
 
 func init() {
 	log.SetFormatter(&log.TextFormatter{
@@ -23,49 +29,79 @@ func main() {
 	if rabbitURL == "" {
 		log.Fatal("Rabbit url not specified")
 	}
-	var inputExchange = os.Getenv("INPUT_EXCHANGE")
-	if inputExchange == "" {
-		//default value
-		inputExchange = "input_exchange"
-	}
-
-	var outputExchange = os.Getenv("OUTPUT_EXCHANGE")
-	if outputExchange == "" {
-		//default value
-		outputExchange = "output_exchange"
-	}
-
-	//test
-	var client = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
-
-	conn, err := amqp.Dial(rabbitURL)
-	if err != nil {
-		log.Error(err)
-	}
-	defer conn.Close()
-	channel, err := conn.Channel()
-	if err != nil {
-		log.Error(err)
-	}
-	ra := &adapter.RabbitAdapter{Channel: channel, Client: client}
-	defer ra.Close()
-
-	if err = ra.CreateOrConnectExchange(outputExchange); err != nil {
-		log.Error(err)
-	}
-	if err = ra.CreateOrConnectExchange(inputExchange); err != nil {
-		log.Error(err)
-	}
+	g,ctx:=errgroup.WithContext(context.Background())
 
 	if outURL := os.Getenv("OUT_URL"); outURL != "" {
-		//# -  listen all
-		if err = ra.Fetch("#", outputExchange, outURL); err != nil {
-			log.Error(err)
-		}
+		ctx = context.WithValue(ctx, "url", outURL)		
 	} else {
 		log.Error("OUT_URL not specified")
 	}
+	ctx = initContextHTTP(ctx)
 
+	
+	conn:=rabbitroutine.NewConnector(rabbitroutine.Config{
+		Wait: 2*time.Second
+	})
+
+	setLiseners(conn)
+
+	ra:=adapter.NewRabbitAdapter(conn)
+
+	g.Go(func() error{
+		err:=conn.Dial(ctx, rabbitURL)
+		if err != nil {
+			log.Fatalf("Failed to establish RabbitMQ connection: %v", err)
+			return err
+		}
+		ch,err:=conn.Channel(ctx)
+		if err != nil {
+			log.Fatalf("Failed to create channel: %v", err)
+			return err
+		}
+		ra.Publisher.Declare(ctx, ch)
+		err = ch.Close()
+		if err != nil {
+			log.Printf("Failed to close channel: %v", err)
+			return err
+		}
+
+		return nil
+	})
+
+
+	g.Go(func()error{
+		log.Println("Consumers starting")
+		defer log.Println("Consumers finished")
+		return conn.StartMultipleConsumers(ctx, ra.Consumer, 5)
+		
+	})
+
+	g.Go(func()error{
+		log.Println("Signal notifier starting")
+		defer log.Println("signal notifier finished")
+
+		return termSignal(ctx)
+	}	
+	})
+
+	g.Go(func()error{
+		log.Info("Start server on port 9090")
+		return http.ListenAndServe(":9090", initRouter(ra))
+	})
+
+	if err:=g.Wait();err!=nil && err!=ErrTermSig{
+		log.Fatal(
+			"Failde to wait goroutine group: ",err
+		)
+	}
+
+	
+	
+
+}
+
+//Create gorilla.mux.Router and add handlefunc for /input/{route} pattern
+func initRouter(ra *adapter.RabbitAdapter) *mux.Router {
 	router := mux.NewRouter()
 	router.HandleFunc("/input/{route}", func(writer http.ResponseWriter, request *http.Request) {
 		var contentType string
@@ -90,7 +126,37 @@ func main() {
 		}
 
 	})
-	log.Info("Start server on port 9090")
-	log.Error(http.ListenAndServe(":9090", router))
+}
 
+//Add Listener which listen main events from rabbitroutine.Connector
+func setLiseners(conn *rabbitroutine.Connector){
+	conn.AddRetriedListener(func(r rabbitroutine.Retried){
+		log.Printf("Try to connect to RabbitMQ attempt=%d, error=\"%v\"", r.ReconnectAttempt,r.Error)
+	})
+
+	conn.AddDialedListener(func(_ rabbitroutine.Dialed){
+		log.Printf("RabbitMQ connetion successfully established")
+	})
+
+	conn.AddAMQPNotifiedListener(func(n rabbitroutine.AMQPNotified){
+		log.Printf("RabbitMQ error received: %v", n.Error)
+	})
+}
+//Set settings for http.Client to context
+func initContextHTTP(parent context.Context) context.Context{
+	//set timeout and ssl-verify to context
+	ctx = context.WithValue(parent, "timeout", 10*time.Minutes)
+	return context.WithValue(ctx, "verify", false)
+}
+
+func termSingal(ctx context.Context) error{
+	sigc:=make(chan os.Signal,1)
+	signal.Notify(sigc,syscall.SIGINT,os.Interrupt,syscall.SIGTERM)
+	select{
+	case<-sigc:
+		log.Println("Termination signal caught")
+		return ErrTermSig
+	}
+	case<-ctx.Done():
+		return ctx.Err()
 }

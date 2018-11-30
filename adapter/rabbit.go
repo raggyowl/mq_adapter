@@ -1,106 +1,185 @@
 package adapter
 
+
 import (
-	"time"
-	"bytes"
-	"fmt"
-	"github.com/pkg/errors"
+	"context"
 	log "github.com/sirupsen/logrus"
+	"crypto/tls"
+	"net/http"
+	"time"
+	"github.com/pkg/errors"
 	"github.com/streadway/amqp"
 	"github.com/furdarius/rabbitroutine"
-	"net/http"
+	"bytes"
+	"fmt"
+	"os"
 )
 
+const (
+	ALL_ROUTES = "#"
+	CONTENT_TYPE = "application/json"
+)
 //TODO: Write tests
 
 
 
-type RabbitAdapter struct {
-	Channel *amqp.Channel
-	Client  *http.Client
-}
 
-//CreateOrConnectExchange create topic exchange if does not exist or connect to exists exchange
-func (r *RabbitAdapter) CreateOrConnectExchange(name string) error {
-	//ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args Table)
-	err := r.Channel.ExchangeDeclare(name, "topic",true, false, false, false, nil)
-	if err != nil {
-		return errors.Wrapf(err, "Failed create or connect to exchange %s", name)
-	}
-	return nil
-}
 
-//Fetch data from exchange by routing key and send it to url
-func (r *RabbitAdapter) Fetch(routingKey, exchange, url string) error {
-	//QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args Table)
-	queue, err := r.Channel.QueueDeclare(fmt.Sprintf("test_mq_adapter_queue_%s", routingKey), true, false, false, false, nil)
-	if err != nil {
-		return errors.Wrapf(err, "Failed declare queue %s", err)
-	}
-	//QueueBind(name, key, exchange string, noWait bool, args Table)
-	err = r.Channel.QueueBind(queue.Name, routingKey, exchange, false, nil)
-	if err != nil {
-		return errors.Wrapf(err, "Failed bind queue %s to %s", queue.Name, exchange)
-	}
-	//Consume(queue, consumer string, autoAsk, exclusive noLocal, noWait bool args Table)
-	msgs, err := r.Channel.Consume(queue.Name, "", false, false, false, false, nil)
-	if err != nil {
-		return errors.Wrapf(err, "Failed consume messages from %s", queue.Name)
-	}
-	go func() {
-		for m := range msgs {
-				if resp,err:=r.Client.Post(url, "application/json", bytes.NewReader(m.Body));err!=nil{
-					log.Warningf("Dispatch message falied with error %s",err)
-					
-				} else{
-					defer resp.Body.Close()
-					if resp.StatusCode == 200 {
-						//Ask(multipli bool)
-						m.Ack(true)
-						continue
-					}
-				}	
-				//Nask(multipli, requeue bool)
-				m.Nack(true,true)
-		}
-	}()
-
-	return nil
-}
-
-//Dispatch data to exchange by routing key
-func (r *RabbitAdapter) Dispatch(routingKey, contentType, exchange string, data []byte) error {
-	//Publish(exchange, key, mandatory, immediate bool, msg Publishing)
-	err := r.Channel.Publish(exchange, routingKey, false, false, amqp.Publishing{
-		ContentType: contentType,
-		Body:        data,
-	})
-	if err != nil {
-		return errors.Wrapf(err, "Failed publish message to %s exchange", exchange)
-	}
-	return nil
-}
-
-//Close opened channel
-func (r *RabbitAdapter) Close() {
-	defer r.Channel.Close()
-}
-
-type RabbitMQAdapter struct{
+type RabbitAdapter struct{
 	Consumer *Consumer
 	Publisher *Publisher
 }
 
-func NewRabbitMQAdapter(conn *rabbitroutine.Connector)*RabbitMQAdapter{
+func NewRabbitAdapter(conn *rabbitroutine.Connector)*RabbitAdapter{
+	income:=os.Getenv("INCOME_EXCHANGE")
+	if income == ""{
+		income = "income_exchange_mq_adapter"
+	}
+	outcome:=os.Getenv("OUTCOME_EXCHANGE")
+	if outcome == ""{
+		outcome = "outcome_exchange_mq_adapter"
+	}
+	outcomeQueue:="outcome_queue_mq_adapter"
 	consumer:=&Consumer{
-		ExchangeName: "test",
-		QueueName: "test",
+		ExchangeName: outcome,
+		QueueName: outcomeQueue,
 	}
 
-	publisher:= rabbitroutine.NewRetryPublisher(
-		rabbitroutine.NewEnsurePublisher(rabbitroutine.NewPool(conn)),
-		rabbitroutine.PublishMaxAttemptsSetup(16),
-		rabbitroutine.PublishDelaySetup(rabbitroutine.LinearDelay(10*time.Millisecond)),
+	return &RabbitAdapter{
+		Consumer:consumer,
+		Publisher:NewPublisher(conn, income),
+	}
+}
+
+//Publisher is wrapper around rabbitroutine.RetryPublisher
+type Publisher struct{
+	publisher *rabbitroutine.RetryPublisher
+	ExchangeName
+}
+
+//Pusblish is a wrapper arounc rabbitroutine.RetryPublisher.(Publish) method.
+func(p *Publisher)Publish(ctx context.Context, routingKey string, msg []byte) error {
+	err := p.publisher.Publish(ctx, p.ExchangeName, routingKey,amqp.Publishing{
+		ContentType: CONTENT_TYPE,
+		Body: msg,
+	})
+	return errors.Wrapf(err, "Failed to publish to %s",p.ExchangeName)
+}
+
+func NewPublisher(conn *rabbitroutine.Connector,exchangeName string)*Publisher{
+	pool:=rabbitroutine.NewPool(conn)
+	ensurePub:=rabbitroutine.NewEnsurePublisher(pool)
+	return &Publisher{
+		publisher: rabbitroutine.NewRetryPublisher(
+			ensurePub,
+			rabbitroutine.PublishMaxAttemptsSetup(16),
+			rabbitroutine.PublishDelaySetup(rabbitroutine.LinearDelay(100*time.Millisecond))
+		),
+		ExchangeName: exchangeName,
+	}
+}
+
+func (p *Publisher)Declare(ctx context.Context,ch *amqp.Channel) error{
+	err:=ch.ExchangeDeclare(p.ExchangeName, "topic", true, false, false, false, nil)
+	if err!=nil{
+		return errors.Wrapf(err, "Failed to declare exchange %s", p.ExchangeName)
+	}
+	return nil
+}
+
+// Consumer implement rabbitroutine.Consumer interface.
+type Consumer struct {
+	ExchangeName string
+	QueueName    string
+}
+
+// Declare implement rabbitroutine.Consumer.(Declare) interface method.
+func (c *Consumer) Declare(ctx context.Context, ch *amqp.Channel) error {
+	err := ch.ExchangeDeclare(
+		c.ExchangeName, // name
+		"direct",       // type
+		true,           // durable
+		false,          // auto-deleted
+		false,          // internal
+		false,          // no-wait
+		nil,            // arguments
 	)
-	publisher.P
+	if err != nil {
+		return errors.Wrapf(err,"Failed to declare exchange %s", c.ExchangeName)
+	}
+
+	_, err = ch.QueueDeclare(
+		c.QueueName, // name
+		true,        // durable
+		false,       // delete when unused
+		false,       // exclusive
+		false,       // no-wait
+		nil,
+	)
+	if err != nil {
+		return errors.Wrapf(err,"Failed to declare queue %s", c.QueueName)
+	}
+
+	err = ch.QueueBind(
+		c.QueueName,    // queue name
+		c.QueueName,    // routing key
+		c.ExchangeName, // exchange
+		false,          // no-wait
+		nil,            // arguments
+	)
+	if err != nil {
+		return errors.Wrapf(err,"Failed to bind queue %v: %v", c.QueueName)
+	}
+
+	return nil
+}
+
+// Consume implement rabbitroutine.Consumer.(Consume) interface method.
+func (c *Consumer) Consume(ctx context.Context, ch *amqp.Channel) error {
+	//clean
+	defer log.Println("consume method finished")
+
+	var url  = ctx.Value("url")
+	var client = &http.Client{
+		Transport:	&http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: ctx.Value("verify").(bool),
+			},
+		},
+		Timeout: ctx.Value("timeout").(time.Duration),
+	}
+
+	msgs, err := ch.Consume(
+		c.QueueName,  // queue
+		"mq_adapter", // consumer name
+		false,        // auto-ack
+		false,        // exclusive
+		false,        // no-local
+		false,        // no-wait
+		nil,          // args
+	)
+	if err != nil {
+		return errors.Wrapf(err,"Failed to consume %s", c.QueueName)
+	}
+
+	for {
+		select {
+		case msg, ok := <-msgs:
+			if !ok {
+				return amqp.ErrClosed
+			}
+			resp, err := client.Post(fmt.Sprintf("%s/%s",url,msg.RoutingKey),CONTENT_TYPE,bytes.NewReader(msg.Body))
+			defer resp.Body.Close()
+			if err!=nil{
+				log.Warningf("Failed to dispatch message to %s: %v",url,err)
+			}
+			if resp.StatusCode == 200{
+				msg.Ack(false)
+			} else {
+				msg.Nack(false, true)
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
