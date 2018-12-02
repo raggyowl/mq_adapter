@@ -4,9 +4,6 @@ go:
 sudo: false
 git:
   depth: 5
-branches:
-  only:
-    - master
 env:
   global:
   - GO111MODULE=on
