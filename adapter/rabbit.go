@@ -1,103 +1,30 @@
 package adapter
 
-
 import (
+	"bytes"
 	"context"
-	log "github.com/sirupsen/logrus"
 	"crypto/tls"
+	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"time"
+
 	"github.com/pkg/errors"
 	"github.com/streadway/amqp"
-	"github.com/furdarius/rabbitroutine"
-	"bytes"
-	"fmt"
-	"os"
 )
-
-const (
-	ALL_ROUTES = "#"
-	CONTENT_TYPE = "application/json"
-)
-//TODO: Write tests
-
-
-
-
-
-type RabbitAdapter struct{
-	Consumer *Consumer
-	Publisher *Publisher
-}
-
-func NewRabbitAdapter(conn *rabbitroutine.Connector)*RabbitAdapter{
-	income:=os.Getenv("INCOME_EXCHANGE")
-	if income == ""{
-		income = "income_exchange_mq_adapter"
-	}
-	outcome:=os.Getenv("OUTCOME_EXCHANGE")
-	if outcome == ""{
-		outcome = "outcome_exchange_mq_adapter"
-	}
-	outcomeQueue:="outcome_queue_mq_adapter"
-	consumer:=&Consumer{
-		ExchangeName: outcome,
-		QueueName: outcomeQueue,
-	}
-
-	return &RabbitAdapter{
-		Consumer:consumer,
-		Publisher:NewPublisher(conn, income),
-	}
-}
-
-//Publisher is wrapper around rabbitroutine.RetryPublisher
-type Publisher struct{
-	publisher *rabbitroutine.RetryPublisher
-	ExchangeName
-}
-
-//Pusblish is a wrapper arounc rabbitroutine.RetryPublisher.(Publish) method.
-func(p *Publisher)Publish(ctx context.Context, routingKey string, msg []byte) error {
-	err := p.publisher.Publish(ctx, p.ExchangeName, routingKey,amqp.Publishing{
-		ContentType: CONTENT_TYPE,
-		Body: msg,
-	})
-	return errors.Wrapf(err, "Failed to publish to %s",p.ExchangeName)
-}
-
-func NewPublisher(conn *rabbitroutine.Connector,exchangeName string)*Publisher{
-	pool:=rabbitroutine.NewPool(conn)
-	ensurePub:=rabbitroutine.NewEnsurePublisher(pool)
-	return &Publisher{
-		publisher: rabbitroutine.NewRetryPublisher(
-			ensurePub,
-			rabbitroutine.PublishMaxAttemptsSetup(16),
-			rabbitroutine.PublishDelaySetup(rabbitroutine.LinearDelay(100*time.Millisecond))
-		),
-		ExchangeName: exchangeName,
-	}
-}
-
-func (p *Publisher)Declare(ctx context.Context,ch *amqp.Channel) error{
-	err:=ch.ExchangeDeclare(p.ExchangeName, "topic", true, false, false, false, nil)
-	if err!=nil{
-		return errors.Wrapf(err, "Failed to declare exchange %s", p.ExchangeName)
-	}
-	return nil
-}
 
 // Consumer implement rabbitroutine.Consumer interface.
 type Consumer struct {
-	ExchangeName string
+	IncomeExchangeName string
+	OutcomeExchangeName string
 	QueueName    string
 }
 
-// Declare implement rabbitroutine.Consumer.(Declare) interface method.
 func (c *Consumer) Declare(ctx context.Context, ch *amqp.Channel) error {
 	err := ch.ExchangeDeclare(
-		c.ExchangeName, // name
-		"direct",       // type
+		c.IncomeExchangeName, // name
+		"topic",       // type
 		true,           // durable
 		false,          // auto-deleted
 		false,          // internal
@@ -105,30 +32,50 @@ func (c *Consumer) Declare(ctx context.Context, ch *amqp.Channel) error {
 		nil,            // arguments
 	)
 	if err != nil {
-		return errors.Wrapf(err,"Failed to declare exchange %s", c.ExchangeName)
+		log.Printf("failed to declare exchange %v: %v", c.IncomeExchangeName, err)
+
+		return err
 	}
 
+	err = ch.ExchangeDeclare(
+		c.OutcomeExchangeName, // name
+		"topic",       // type
+		true,           // durable
+		false,          // auto-deleted
+		false,          // internal
+		false,          // no-wait
+		nil,            // arguments
+	)
+	if err != nil {
+		log.Printf("failed to declare exchange %v: %v", c.OutcomeExchangeName, err)
+
+		return err
+	}
 	_, err = ch.QueueDeclare(
 		c.QueueName, // name
 		true,        // durable
 		false,       // delete when unused
 		false,       // exclusive
 		false,       // no-wait
-		nil,
+		nil,         // arguments
 	)
 	if err != nil {
-		return errors.Wrapf(err,"Failed to declare queue %s", c.QueueName)
+		log.Printf("failed to declare queue %v: %v", c.QueueName, err)
+
+		return err
 	}
 
 	err = ch.QueueBind(
 		c.QueueName,    // queue name
-		c.QueueName,    // routing key
-		c.ExchangeName, // exchange
+		"#",    // routing key
+		c.IncomeExchangeName, // exchange
 		false,          // no-wait
 		nil,            // arguments
 	)
 	if err != nil {
-		return errors.Wrapf(err,"Failed to bind queue %v: %v", c.QueueName)
+		log.Printf("failed to bind queue %v: %v", c.QueueName, err)
+
+		return err
 	}
 
 	return nil
@@ -136,18 +83,20 @@ func (c *Consumer) Declare(ctx context.Context, ch *amqp.Channel) error {
 
 // Consume implement rabbitroutine.Consumer.(Consume) interface method.
 func (c *Consumer) Consume(ctx context.Context, ch *amqp.Channel) error {
-	//clean
 	defer log.Println("consume method finished")
-
-	var url  = ctx.Value("url")
-	var client = &http.Client{
-		Transport:	&http.Transport{
+	out := os.Getenv("OUT_URL")
+	if out == "" {
+		return errors.New("OUT URL not specified")
+	}
+	client := http.Client{
+		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: ctx.Value("verify").(bool),
+				InsecureSkipVerify: true,
 			},
 		},
-		Timeout: ctx.Value("timeout").(time.Duration),
+		Timeout: 2 * time.Minute,
 	}
+	
 
 	msgs, err := ch.Consume(
 		c.QueueName,  // queue
@@ -159,7 +108,9 @@ func (c *Consumer) Consume(ctx context.Context, ch *amqp.Channel) error {
 		nil,          // args
 	)
 	if err != nil {
-		return errors.Wrapf(err,"Failed to consume %s", c.QueueName)
+		log.Printf("failed to consume %v: %v", c.QueueName, err)
+
+		return err
 	}
 
 	for {
@@ -168,18 +119,23 @@ func (c *Consumer) Consume(ctx context.Context, ch *amqp.Channel) error {
 			if !ok {
 				return amqp.ErrClosed
 			}
-			resp, err := client.Post(fmt.Sprintf("%s/%s",url,msg.RoutingKey),CONTENT_TYPE,bytes.NewReader(msg.Body))
-			defer resp.Body.Close()
+			//fmt.Println("New message:", content)
+			resp,err:=client.Post(fmt.Sprintf("%s/%s", out, msg.RoutingKey), "application/json", bytes.NewReader(msg.Body))
 			if err!=nil{
-				log.Warningf("Failed to dispatch message to %s: %v",url,err)
+				log.Printf("failde to Send data: %v",err)
 			}
+			defer resp.Body.Close()
 			if resp.StatusCode == 200{
-				msg.Ack(false)
-			} else {
-				msg.Nack(false, true)
+				err = msg.Ack(false)
+				if err != nil {
+					log.Printf("failed to Ack message: %v", err)
+				}
 			}
+			
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
 }
+
+
