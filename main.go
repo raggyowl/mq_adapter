@@ -23,7 +23,7 @@ func main() {
 	income := os.Getenv("income")
 	outcome := os.Getenv("outcome")
 	if income == "" || outcome == "" {
-		log.Fatal("Echanges not specified")
+		log.Fatal("Exchanges not specified")
 	}
 
 	url := os.Getenv("RABBIT_URL")
@@ -35,7 +35,7 @@ func main() {
 		// Max reconnect attempts
 		ReconnectAttempts: 20,
 		// How long wait between reconnect
-		Wait: 2 * time.Second,
+		Wait: 5 * time.Second,
 	})
 	conn.AddRetriedListener(func(r rabbitroutine.Retried) {
 		log.Printf("try to connect to RabbitMQ: attempt=%d, error=\"%v\"",
@@ -63,6 +63,7 @@ func main() {
 		rabbitroutine.PublishMaxAttemptsSetup(16),
 		rabbitroutine.PublishDelaySetup(rabbitroutine.LinearDelay(10*time.Millisecond)),
 	)
+	fmt.Println(pub)
 
 	go func() {
 		err := conn.Dial(ctx, url)
@@ -80,7 +81,14 @@ func main() {
 
 	go func() {
 		router := mux.NewRouter()
-		router.HandleFunc("input/{route}", func(rw http.ResponseWriter, r *http.Request) {
+		router.HandleFunc("/{c}", func(rw http.ResponseWriter, r *http.Request) {
+			_, cancel := context.WithTimeout(ctx, 1000*time.Millisecond)
+			defer cancel()
+			defer r.Body.Close()
+			rw.WriteHeader(http.StatusOK)
+			rw.Write([]byte(mux.Vars(r)["c"]))
+		})
+		router.HandleFunc("/input/{route}", func(rw http.ResponseWriter, r *http.Request) {
 			timeoutCtx, cancel := context.WithTimeout(ctx, 1000*time.Millisecond)
 			defer cancel()
 			rk := mux.Vars(r)
@@ -89,8 +97,6 @@ func main() {
 			if err != nil {
 				log.Printf("failed to parse: %v", err)
 				rw.WriteHeader(http.StatusBadRequest)
-				rw.Write([]byte("failed to parse"))
-
 				return
 			}
 
@@ -100,9 +106,10 @@ func main() {
 			if err != nil {
 				rw.WriteHeader(http.StatusBadRequest)
 				log.Println("failed to publish:", err)
-
 				return
 			}
+
+			rw.WriteHeader(http.StatusOK)
 
 		})
 

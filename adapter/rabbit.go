@@ -123,14 +123,15 @@ func (c *Consumer) Consume(ctx context.Context, ch *amqp.Channel) error {
 			resp,err:=client.Post(fmt.Sprintf("%s/%s", out, msg.RoutingKey), "application/json", bytes.NewReader(msg.Body))
 			if err!=nil{
 				log.Printf("failde to Send data: %v",err)
+				msg.Nack(false,true)
+				continue
 			}
 			defer resp.Body.Close()
 			if resp.StatusCode == 200{
-				err = msg.Ack(false)
-				if err != nil {
-					log.Printf("failed to Ack message: %v", err)
-				}
+				 msg.Ack(false)
+				 continue 
 			}
+			msg.Nack(false,true)
 			
 		case <-ctx.Done():
 			return ctx.Err()
