@@ -82,7 +82,7 @@ func main() {
 	go func() {
 		router := mux.NewRouter()
 		router.HandleFunc("/{c}", func(rw http.ResponseWriter, r *http.Request) {
-			_, cancel := context.WithTimeout(ctx, 1000*time.Millisecond)
+			_, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
 			defer r.Body.Close()
 			rw.WriteHeader(http.StatusOK)
