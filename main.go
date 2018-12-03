@@ -89,7 +89,7 @@ func main() {
 			rw.Write([]byte(mux.Vars(r)["c"]))
 		})
 		router.HandleFunc("/input/{route}", func(rw http.ResponseWriter, r *http.Request) {
-			timeoutCtx, cancel := context.WithTimeout(ctx, 1000*time.Millisecond)
+			timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
 			rk := mux.Vars(r)
 			defer r.Body.Close()
