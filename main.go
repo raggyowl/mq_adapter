@@ -73,7 +73,7 @@ func main() {
 	}()
 
 	go func() {
-		err := conn.StartMultipleConsumers(ctx, consumer, 5)
+		err := conn.StartMultipleConsumers(ctx, consumer, 2) //Conumer count 
 		if err != nil {
 			log.Println("failed to start consumer:", err)
 		}
